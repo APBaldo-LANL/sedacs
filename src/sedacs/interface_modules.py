@@ -6,6 +6,7 @@ Routines to handle the interface with the engines.
 
 import ctypes
 import os
+import torch
 
 import numpy as np
 from sedacs.message import *
@@ -39,6 +40,22 @@ try:
     xtblib = True
 except Exception as e:
     xtblib = False
+
+try:
+    from dftorch._h0ands import H0_and_S_vectorized
+    from dftorch._coulomb_matrix import coulomb_matrix_vectorized
+
+    from dftorch._nearestneighborlist import (
+        vectorized_nearestneighborlist,
+        vectorized_nearestneighborlist_batch,
+    )
+    from dftorch._tools import fractional_matrix_power_symm
+    dftorchlib = True
+except Exception as e:
+    dftorchlib = False
+    error_at("interface_modules", "DFTorch modules were not found")
+
+
 
 # TODO These proxies should at some point probably be more properly
 # integrated into the code.
@@ -140,6 +157,10 @@ def build_coul_ham_module(
             hubbardu=False,
             verb=False,
         )
+
+    elif eng.name == "DFTorch":
+        print("testing DFTorch Coulombic Hamiltonian")
+
     elif eng.name == "LATTE":
         # If using LATTE as engine, the coulombic potential would be added directly in the LATTE code.
         ham = ham0
@@ -278,6 +299,57 @@ def get_hamiltonian_module(
         hamiltonian = res.get("hamiltonian-matrix") * 27.211386245981 # Hartree to eV
         overlap = res.get("overlap-matrix")
         zmat = None
+
+    elif eng.name == "DFTorch":
+
+        print("testing non SCF DFTorch Hamiltonian")
+        nats = len(coords[:, 0])
+
+        xcoord,ycoord,zcoord = np.zeros(nats), np.zeros(nats), np.zeros(nats) 
+        xcoord = coords[:,0]
+        ycoord = coords[:,1]
+        zcoord = coords[:,2]
+
+        # converting various numpy arrays as torch tensors
+        RX = torch.from_numpy(xcoord)
+        RY = torch.from_numpy(ycoord)
+        RZ = torch.from_numpy(zcoord)
+        TYPE = torch.from_numpy(types)
+
+        CUTOFF = 50
+
+        (
+            _,
+            _,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            _,
+            _,
+            neighbor_I,
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
+        ) = vectorized_nearestneighborlist(
+            TYPE,
+            RX,
+            RY,
+            RZ,
+            structure.cell,
+            CUTOFF,
+            nats,
+            const,
+            upper_tri_only=False,
+            remove_self_neigh=False,
+            verbose=verbose,
+        )
+
+
+
+
+
+
 
     elif eng.name == "LATTE":
 

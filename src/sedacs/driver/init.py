@@ -62,6 +62,7 @@ def available_device():
     raise Exception("Pytorch is not available!")
 
 
+
 ## Getting arguments
 # @brief This will get some arguments from command line. WARNING!!! This makes the code depending
 # on the argparse library...
@@ -75,6 +76,7 @@ def get_args():
     args = parser.parse_args()
     #if args.use_torch:
     args.device = available_device()
+    args.device = torch.device("cpu")
 
     return args
 
@@ -161,6 +163,7 @@ def init(args):
     eng = comm.bcast(eng, root=0)
     sy = comm.bcast(sy, root=0)
     hindex = comm.bcast(hindex, root=0)
+
     
     lattice_vecs = torch.from_numpy(sy.latticeVectors).to(args.device)
     coords_T = torch.from_numpy(sy.coords).to(args.device).T.contiguous()
