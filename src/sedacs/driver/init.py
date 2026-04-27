@@ -76,7 +76,6 @@ def get_args():
     args = parser.parse_args()
     #if args.use_torch:
     args.device = available_device()
-    args.device = torch.device("cpu")
 
     return args
 

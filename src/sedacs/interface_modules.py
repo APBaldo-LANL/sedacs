@@ -7,12 +7,13 @@ Routines to handle the interface with the engines.
 import ctypes
 import os
 import torch
+import json
 
 import numpy as np
 from sedacs.message import *
 from sedacs.globals import *
 from sedacs.periodic_table import PeriodicTable
-import sys 
+import sys
 from sedacs.engine import Engine
 from sedacs.globals import *
 from sedacs.types import ArrayLike
@@ -42,17 +43,16 @@ except Exception as e:
     xtblib = False
 
 try:
+    from dftorch.Constants import Constants
+    from dftorch.Structure import Structure
     from dftorch._h0ands import H0_and_S_vectorized
     from dftorch._coulomb_matrix import coulomb_matrix_vectorized
-
     from dftorch._nearestneighborlist import (
         vectorized_nearestneighborlist,
         vectorized_nearestneighborlist_batch,
     )
     from dftorch._tools import fractional_matrix_power_symm
-    dftorchlib = True
 except Exception as e:
-    dftorchlib = False
     error_at("interface_modules", "DFTorch modules were not found")
 
 
@@ -160,6 +160,176 @@ def build_coul_ham_module(
 
     elif eng.name == "DFTorch":
         print("testing DFTorch Coulombic Hamiltonian")
+        device="cuda"
+
+        print(charges)
+        params_dir = os.getenv("DFTORCH_PARAMS_PATH")
+        if params_dir is None:
+            raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
+
+        filename = "subSy0_0.xyz"
+
+
+
+        pt = PeriodicTable()
+
+        # Initializing the atomic numbers array
+        atomicNumbers = np.zeros_like(types, dtype=np.int32)
+        # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
+        for i in range(len(types)):
+            atomicNumbers[i] = pt.get_atomic_number(symbols[types[i]])
+
+        nats = len(coords[:, 0])
+        xcoord,ycoord,zcoord = np.zeros(nats), np.zeros(nats), np.zeros(nats) 
+        xcoord = coords[:,0]
+        ycoord = coords[:,1]
+        zcoord = coords[:,2]
+
+        # converting various numpy arrays as torch tensors
+        RX = torch.from_numpy(xcoord).to(device=device)
+        RY = torch.from_numpy(ycoord).to(device=device)
+        RZ = torch.from_numpy(zcoord).to(device=device)
+        TYPE = torch.from_numpy(atomicNumbers).to(device=device)
+
+        CUTOFF = 5
+        pt.label=pt.symbols
+        print(latticeVectors)
+        print(latticeVectors[0,0])
+        LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
+        latticeVectors = torch.from_numpy(latticeVectors).to(device=device)
+
+        const = Constants(
+            filename,
+            params_dir,
+            magnetic_hubbard_ldep=False,
+        ).to(device)
+
+
+        Hubbard_U = const.U[TYPE]
+        n_orbitals_per_atom = const.n_orb[TYPE]
+        H_INDEX_START = torch.zeros(nats, dtype=torch.int64, device=device)
+        H_INDEX_START[1:] = torch.cumsum(n_orbitals_per_atom, dim=0)[:-1]        
+        # Shell on-site energies per atom (pulled from your dicts)
+        EsA = const.Es[TYPE]  # (Nr_atoms,)
+        EpA = const.Ep[TYPE]  # (Nr_atoms,)
+        EdA = const.Ed[TYPE]  # (Nr_atoms,)
+        
+        # Which shells exist for each atom, based on your basis size:
+        # 1  -> H-like: s   
+        # 4  -> main-group sp: s + 3*p
+        # 9  -> transition-metal spd: s + 3*p + 5*d
+        has_p = const.n_orb[TYPE] >= 4  # p present for 4 or 9
+        has_d = const.n_orb[TYPE] == 9  # d present only for 9 here
+        # (Optional: if you ever use sd-only (6 orbitals), set has_d |= (const.n_orb[self.TYPE] == 6)
+        #            and exclude p for that case.)
+                
+        # Build a per-atom template in the standard AO order: [s, px, py, pz, dxy, dyz, dzx, dx2-y2, dz2]
+        # (All p orbitals get EpA; all d orbitals get EdA.)
+        template = torch.stack(
+            (
+                EsA,  # s
+                EpA,
+                EpA,
+                EpA,  # p triplet
+                EdA,
+                EdA,
+                EdA,
+                EdA,
+                EdA,  # d quintet
+            ),
+            dim=1,  # shape: (Nr_atoms, 9)
+        )
+        
+        # Per-atom mask telling which of the 9 positions are actually present 
+        mask = torch.zeros_like(template, dtype=torch.bool)  # (Nr_atoms, 9)
+        mask[:, 0] = True  # s always present
+        mask[:, 1:4] = has_p.unsqueeze(1).expand(-1, 3)  # p block present?   
+        mask[:, 4:9] = has_d.unsqueeze(1).expand(-1, 5)  # d block present?
+
+        # Flatten row-by-row keeping only present orbitals for each atom.
+        # Result length = sum_i n_orb[i]
+        diagonal = template[mask]  # 1-D tensor
+        HDIM = diagonal.shape[-1]  # Total number of basis functions in system
+            
+        UsA = const.U[TYPE]  # (Nr_atoms,)
+        UpA = const.Up[TYPE]  # (Nr_atoms,)
+        UdA = const.Ud[TYPE]  # (Nr_atoms,)
+        num_s = const.n_s[TYPE]  # (Nr_atoms,)
+        num_p = const.n_p[TYPE]  # (Nr_atoms,)
+        num_d = const.n_d[TYPE]  # (Nr_atoms,)
+
+        #Coulomb_acc = self.dftorch_params["Coulomb_acc"]
+        Coulomb_acc = 1e-5
+        SQRTX = math.sqrt(-math.log(Coulomb_acc))
+        #COULCUT = self.dftorch_params["cutoff"]
+        COULCUT = 20.0
+        CALPHA = SQRTX / COULCUT
+        if COULCUT > 50.0:
+            COULCUT = 50.0
+            CALPHA = SQRTX / COULCUT
+
+
+        (
+                _,
+                nndist,
+                nnRx,
+                nnRy,
+                nnRz,
+                nnType,
+                nnStruct,
+                _,
+                neighbor_I,
+                neighbor_J,
+                IJ_pair_type,
+                JI_pair_type,
+            ) = vectorized_nearestneighborlist(
+                TYPE,
+                RX,
+                RY,
+                RZ,
+                LBox,
+                COULCUT,
+                structure.Nats,
+                const,
+                upper_tri_only=False,
+                remove_self_neigh=False,
+                verbose=False,
+            )
+
+        C, dCC = coulomb_matrix_vectorized(
+                Hubbard_U,
+                TYPE,
+                RX,
+                RY,
+                RZ,
+                LBox,
+                lattice_vecs,
+                nats,
+                Coulomb_acc,
+                nnRx,
+                nnRy,
+                nnRz,
+                nnType,
+                neighbor_I,
+                neighbor_J,
+                CALPHA,
+                verbose=False,
+        )
+        del (
+                _,
+                nndist,
+                nnRx,
+                nnRy,
+                nnRz,
+                nnType,
+                nnStruct,
+                neighbor_I,
+                neighbor_J,
+                IJ_pair_type,
+                JI_pair_type,
+        )
+
+
 
     elif eng.name == "LATTE":
         # If using LATTE as engine, the coulombic potential would be added directly in the LATTE code.
@@ -303,21 +473,107 @@ def get_hamiltonian_module(
     elif eng.name == "DFTorch":
 
         print("testing non SCF DFTorch Hamiltonian")
-        nats = len(coords[:, 0])
+        device="cuda"
 
+
+        params_dir = os.getenv("DFTORCH_PARAMS_PATH")
+        if params_dir is None:
+            raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
+
+        filename = "subSy0_0.xyz"
+
+
+
+        pt = PeriodicTable()
+
+        # Initializing the atomic numbers array
+        atomicNumbers = np.zeros_like(types, dtype=np.int32)
+        # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
+        for i in range(len(types)):
+            atomicNumbers[i] = pt.get_atomic_number(symbols[types[i]])
+
+        nats = len(coords[:, 0])
         xcoord,ycoord,zcoord = np.zeros(nats), np.zeros(nats), np.zeros(nats) 
         xcoord = coords[:,0]
         ycoord = coords[:,1]
         zcoord = coords[:,2]
 
         # converting various numpy arrays as torch tensors
-        RX = torch.from_numpy(xcoord)
-        RY = torch.from_numpy(ycoord)
-        RZ = torch.from_numpy(zcoord)
-        TYPE = torch.from_numpy(types)
+        RX = torch.from_numpy(xcoord).to(device=device)
+        RY = torch.from_numpy(ycoord).to(device=device)
+        RZ = torch.from_numpy(zcoord).to(device=device)
+        TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 50
+        CUTOFF = 5
+        pt.label=pt.symbols
+        print(latticeVectors)
+        print(latticeVectors[0,0])
+        LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
+
+        const = Constants(
+            filename,
+            params_dir,
+            magnetic_hubbard_ldep=False,
+        ).to(device)
+
+
+        Hubbard_U = const.U[TYPE]
+        n_orbitals_per_atom = const.n_orb[TYPE]
+        H_INDEX_START = torch.zeros(nats, dtype=torch.int64, device=device)
+        H_INDEX_START[1:] = torch.cumsum(n_orbitals_per_atom, dim=0)[:-1]        
+        # Shell on-site energies per atom (pulled from your dicts)
+        EsA = const.Es[TYPE]  # (Nr_atoms,)
+        EpA = const.Ep[TYPE]  # (Nr_atoms,)
+        EdA = const.Ed[TYPE]  # (Nr_atoms,)
+        
+        # Which shells exist for each atom, based on your basis size:
+        # 1  -> H-like: s   
+        # 4  -> main-group sp: s + 3*p
+        # 9  -> transition-metal spd: s + 3*p + 5*d
+        has_p = const.n_orb[TYPE] >= 4  # p present for 4 or 9
+        has_d = const.n_orb[TYPE] == 9  # d present only for 9 here
+        # (Optional: if you ever use sd-only (6 orbitals), set has_d |= (const.n_orb[self.TYPE] == 6)
+        #            and exclude p for that case.)
+                
+        # Build a per-atom template in the standard AO order: [s, px, py, pz, dxy, dyz, dzx, dx2-y2, dz2]
+        # (All p orbitals get EpA; all d orbitals get EdA.)
+        template = torch.stack(
+            (
+                EsA,  # s
+                EpA,
+                EpA,
+                EpA,  # p triplet
+                EdA,
+                EdA,
+                EdA,
+                EdA,
+                EdA,  # d quintet
+            ),
+            dim=1,  # shape: (Nr_atoms, 9)
+        )
+        
+        # Per-atom mask telling which of the 9 positions are actually present 
+        mask = torch.zeros_like(template, dtype=torch.bool)  # (Nr_atoms, 9)
+        mask[:, 0] = True  # s always present
+        mask[:, 1:4] = has_p.unsqueeze(1).expand(-1, 3)  # p block present?   
+        mask[:, 4:9] = has_d.unsqueeze(1).expand(-1, 5)  # d block present?
+
+
+        # Flatten row-by-row keeping only present orbitals for each atom.
+        # Result length = sum_i n_orb[i]
+        diagonal = template[mask]  # 1-D tensor
+        HDIM = diagonal.shape[-1]  # Total number of basis functions in system
+            
+        UsA = const.U[TYPE]  # (Nr_atoms,)
+        UpA = const.Up[TYPE]  # (Nr_atoms,)
+        UdA = const.Ud[TYPE]  # (Nr_atoms,)
+        num_s = const.n_s[TYPE]  # (Nr_atoms,)
+        num_p = const.n_p[TYPE]  # (Nr_atoms,)
+        num_d = const.n_d[TYPE]  # (Nr_atoms,)
+
+        # Build the neighborlist
+            
         (
             _,
             _,
@@ -326,7 +582,7 @@ def get_hamiltonian_module(
             nnRz,
             nnType,
             _,
-            _,
+            _,   
             neighbor_I,
             neighbor_J,
             IJ_pair_type,
@@ -336,20 +592,55 @@ def get_hamiltonian_module(
             RX,
             RY,
             RZ,
-            structure.cell,
+            LBox,
             CUTOFF,
             nats,
             const,
-            upper_tri_only=False,
+            upper_tri_only=False,  
             remove_self_neigh=False,
-            verbose=verbose,
+        )
+                
+        # Get Hamiltonian, Overlap, etc,
+        H0, dH0, S, dS = H0_and_S_vectorized(
+            TYPE,
+            RX,
+            RY,
+            RZ,
+            diagonal, 
+            H_INDEX_START,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            const,
+            neighbor_I,
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
+            const.R_orb,
+            const.coeffs_tensor,
+            verbose=False,
+        )
+        del (
+            _,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            neighbor_I,  
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
         )
 
 
 
+        print(H0)
+        Z = fractional_matrix_power_symm(S, -0.5)
 
-
-
+        hamiltonian = H0.numpy(force=True)
+        overlap = S.numpy(force=True)
+        zmat = Z.numpy(force=True)
 
     elif eng.name == "LATTE":
 
