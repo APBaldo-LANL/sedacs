@@ -119,6 +119,28 @@ def get_density_matrix(
                 newsystem=newsystem,
                 keepmem=keepmem,
             )
+        elif eng.name == "DFTorch":
+            rho, charges = get_density_matrix_modules(
+                eng,
+                partIndex,
+                nparts,
+                norbs,
+                latticeVectors,
+                coords,
+                types,
+                symbols,
+                ham,
+                vcouls,
+                nocc,
+                norbsInCore=norbsInCore,
+                mu=mu,
+                etemp=etemp,
+                overlap=overlap,
+                full_data=full_data,
+                verb=verb,
+                newsystem=newsystem,
+                keepmem=keepmem,
+            )
         elif full_data:
             rho, evals, dvals = get_density_matrix_modules(
                 eng,
@@ -168,6 +190,8 @@ def get_density_matrix(
             "ERROR!!!: Interface type not recognized. Use any of the following: Module,File,Socket,MDI"
         )
     if eng.name == "LATTE":
+        return rho, charges
+    elif eng.name == "DFTorch":
         return rho, charges
     elif full_data:
         return rho, evals, dvals

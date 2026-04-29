@@ -44,6 +44,8 @@ torch.cuda.empty_cache()
 device = "cuda"
 
 
+os.environ["DFTORCH_PARAMS_PATH"] = "/global/homes/a/abaldo2/DFTorch/experiments/sk_orig/mio-1-1/mio-1-1/"
+
 #device = "cpu"
 
 # Pass arguments from command line
@@ -61,9 +63,10 @@ sdc, eng, comm, rank, numranks, sy, hindex, graphNL, graphweights  = init(
 )
 
 
-print(vars(sy))
 
-sy.latticeVectors = np.array([[40.230,0,0],[0,40.23,0],[0,0,40.230]])
+#sy.latticeVectors = np.array([[15.459,0,0],[0,15.459,0],[0,0,15.459]])
+#sy.latticeVectors = np.array([[40.23,0,0],[0,40.23,0],[0,0,40.23]])
+sy.latticeVectors = np.array([[21.83,0,0],[0,21.83,0],[0,0,21.83]])
 
 dftorch_params = {
     "UNRESTRICTED": False,
@@ -78,7 +81,7 @@ dftorch_params = {
 
     "coul_method": "!PME",  # 'FULL' for full coulomb matrix, 'PME' for PME method
     "Coulomb_acc": 1e-6,  # Coulomb accuracy for full coulomb calcs or t_err for PME
-    "cutoff": 12.0,  # Coulomb cutoff
+    "cutoff": 5.0,  # Coulomb cutoff
     "PME_order": 4,  # Ignored for FULL coulomb method
 
     "SCF_MAX_ITER": 90,  # Maximum number of SCF iterations
@@ -95,7 +98,9 @@ dftorch_params = {
     #"solvation_model": "gbsa",
 }
 
-LBOX = torch.tensor([40.23,40.23,40.23], device=device)
+#LBOX = torch.tensor([15.459,15.459,15.459], device=device)
+#LBOX = torch.tensor([40.23,40.23,40.23], device=device)
+LBOX = torch.tensor([21.83,21.83,21.83], device=device)
 
 sy.lbox = LBOX
 print(LBOX)
@@ -107,12 +112,12 @@ print(vars(sdc))
 
 
 const = Constants(
-    sdc.coordsFileName,
+    'coords_1032.xyz',
     sdc.dftorch_params,
 ).to(device)
 
 structure1 = Structure(
-    sdc.coordsFileName,
+    'coords_1032.xyz',
     sy.lbox,
     const,
     charge=0,
@@ -120,19 +125,22 @@ structure1 = Structure(
     device=device,
 )
 
+sy.hubbard_u = structure1.Hubbard_U.numpy(force=True)
 
-
-print(sy)
-
+print(sy.hubbard_u)
 sdc.verb = True
 
 
 # Perform a graph-adaptive calculation of the density matrix through SCF cycles
-mu = 0.0
+mu = 6.00
 graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_KernelSCFDM(
     sdc, eng, comm, rank, numranks, sy, hindex, graphNL, mu, graphweights=graphweights
 )
 # Perform a single-point graph-adaptive calculation of the energy and forces
+print('Converged mu and charges')
+print(mu)
+print(sy.charges)
+
 graphDH, sy.charges, energy, forces, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_sp_energy_forces(
     sdc, eng, comm, rank, numranks, sy, parts, partsCoreHalo, hindex, graphNL, mu
 )

@@ -197,7 +197,7 @@ def get_PME_coulvs(
 # @param overlap Overlap matrix for nonorthogonal formulations.
 # @param verb Verbosity switch.
 #
-def build_coul_ham(engine,ham0,vcouls,types,charges,orbital_based,hindex,overlap=None,verb=False):
+def build_coul_ham(engine,ham0,vcouls,types,charges,orbital_based,hindex,symbols,overlap=None,verb=False):
     # Call the proper interface
     # If there is no interface, one should write its own Hamiltonian
     if engine.interface == "None":
@@ -205,7 +205,7 @@ def build_coul_ham(engine,ham0,vcouls,types,charges,orbital_based,hindex,overlap
     # Tight interface using modules or an external code compiled as a library
     elif engine.interface == "Module":
         # We will call proxyA directly as it will be loaded as a module.
-        ham = build_coul_ham_module(engine,ham0,vcouls,types,charges,orbital_based,hindex,overlap=overlap,verb=False)
+        ham = build_coul_ham_module(engine,ham0,vcouls,types,charges,orbital_based,hindex,symbols,overlap=overlap,verb=False)
     # Using any available library. 
     elif engine.interface == "MDI":
         raise NotImplemented("MDI interface not implemented yet")

@@ -7,6 +7,7 @@ Routines to handle the interface with the engines.
 import ctypes
 import os
 import torch
+import torch._dynamo
 import json
 
 import numpy as np
@@ -52,6 +53,7 @@ try:
         vectorized_nearestneighborlist_batch,
     )
     from dftorch._tools import fractional_matrix_power_symm
+    from dftorch._dm_fermi_x import dm_fermi_x
 except Exception as e:
     error_at("interface_modules", "DFTorch modules were not found")
 
@@ -98,7 +100,7 @@ def init_proxy(symbols,orbs):
 
 
 def build_coul_ham_module(
-    eng, ham0, vcouls, types, charges, orbital_based, hindex, overlap=None, verb=False
+    eng, ham0, vcouls, types, charges, orbital_based, hindex, symbols, overlap=None, verb=False
 ):
     """
     Interface to call external engine for adding Coulomb potential to the Hamiltonian matrix.
@@ -159,7 +161,65 @@ def build_coul_ham_module(
         )
 
     elif eng.name == "DFTorch":
-        ham = ham0
+        print('Building DFTorch Hcoul .... ')
+        device = 'cuda'
+        pt = PeriodicTable()
+        ZNuc = np.zeros_like(types,dtype=np.int32)
+        n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
+        atomicNumbers = np.zeros_like(types,dtype=np.int32)
+        # Initializing the atomic numbers array
+        #atomicNumbers = np.zeros_like(types, dtype=np.int32)
+        # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
+        for i in range(len(types)):
+            atomicNumbers[i] = pt.get_atomic_number(symbols[types[i]])
+            ZNuc[i] = pt.numel[atomicNumbers[i]]
+            n_orb_per_atom[i] = pt.n_orb[atomicNumbers[i]]
+
+        n_orb_per_atom = torch.from_numpy(n_orb_per_atom).to(device=device)
+        atom_ids = torch.repeat_interleave(torch.arange(len(n_orb_per_atom), device=device), n_orb_per_atom)
+
+
+        params_dir = os.getenv("DFTORCH_PARAMS_PATH")
+        #filename = "coords_1.xyz"
+        filename = "coords_1032.xyz"
+      
+        const = Constants(
+            filename,
+            params_dir,
+            magnetic_hubbard_ldep=False,
+        ).to(device)
+        TYPE = torch.from_numpy(atomicNumbers).to(device=device)
+        S = torch.from_numpy(overlap).to(device=device)
+        H0 = torch.from_numpy(ham0).to(device=device)
+        Z = fractional_matrix_power_symm(S, -0.5)
+
+        #vcouls = np.array([4.58, -7.68, 4.58])
+
+        Hubbard_U = const.U[TYPE]
+        Hubbard_U_gathered = Hubbard_U[atom_ids]
+        CoulPot = torch.from_numpy(vcouls).to(device=device)
+        CoulPot_sr = CoulPot[atom_ids]
+        q = torch.from_numpy(charges).to(device=device)
+        q_sr = q[atom_ids]
+
+
+        Hcoul_diag = (
+            Hubbard_U_gathered * q_sr + CoulPot_sr
+        )
+
+        #print(Hcoul_diag)
+        #print(type(Hcoul_diag))
+        Hcoul_diag = CoulPot_sr
+
+        Hcoul = 0.5 * (
+            Hcoul_diag.unsqueeze(1) * S
+            + S * Hcoul_diag.unsqueeze(0)
+        )
+
+
+        H = H0 + Hcoul
+        H = Z.T * H * Z
+        ham = H.numpy(force=True)
 
 
     elif eng.name == "LATTE":
@@ -311,7 +371,8 @@ def get_hamiltonian_module(
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        filename = "coords_1299.xyz"
+        #filename = "coords_1.xyz"
+        filename = "coords_1032.xyz"
 
 
 
@@ -337,8 +398,6 @@ def get_hamiltonian_module(
 
         CUTOFF = 5
         pt.label=pt.symbols
-        print(latticeVectors)
-        print(latticeVectors[0,0])
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
 
@@ -350,7 +409,6 @@ def get_hamiltonian_module(
 
 
         Hubbard_U = const.U[TYPE]
-        print(Hubbard_U.shape)
         n_orbitals_per_atom = const.n_orb[TYPE]
         H_INDEX_START = torch.zeros(nats, dtype=torch.int64, device=device)
         H_INDEX_START[1:] = torch.cumsum(n_orbitals_per_atom, dim=0)[:-1]        
@@ -469,7 +527,7 @@ def get_hamiltonian_module(
 
         Z = fractional_matrix_power_symm(S, -0.5)
         #symmetrize non-SCF Hamiltonian
-        H0 = Z.T @ H0 @ Z
+        #H0 = Z.T @ H0 @ Z
         #Dump tensors to cpu and convert to numpy arrays
         hamiltonian = H0.numpy(force=True)
         overlap = S.numpy(force=True)
@@ -696,14 +754,38 @@ def get_evals_dvals_modules(
         error_at("get_evals_dvals_modules", "Not implemented yet.")
 
     elif eng.name == "DFTorch":
-        device='cpu'
+        device='cuda'
         H = torch.from_numpy(ham).to(device=device)
-        e, Q = torch.linalg.eigh(H)
-        de = torch.sum(Q ** 2,dim=0)
+
+        if torch.sum(vcouls) = 0.0:
+            S = torch.from_numpy(overlap).to(device=device)
+            Z = fractional_matrix_power_symm(S, -0.5)
+            H = Z.T * H * Z
+            e, Q = torch.linalg.eigh(H)
+        else:
+            pt = PeriodicTable()
+            ZNuc = np.zeros_like(types,dtype=np.int32)
+            n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
+            atomicNumbers = np.zeros_like(types,dtype=np.int32)
+            # Initializing the atomic numbers array
+            #atomicNumbers = np.zeros_like(types, dtype=np.int32)
+            # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
+            for i in range(len(types)):
+                atomicNumbers[i] = pt.get_atomic_number(symbols[types[i]])
+                ZNuc[i] = pt.numel[atomicNumbers[i]]
+                n_orb_per_atom[i] = pt.n_orb[atomicNumbers[i]]
+
+                n_orb_per_atom = torch.from_numpy(n_orb_per_atom).to(device=device)
+                atom_ids = torch.repeat_interleave(torch.arange(len(n_orb_per_atom), device=device), n_orb_per_atom)
+
+
+
+
 
         evects = Q.numpy(force=True)
         evals = e.numpy(force=True)
         dvals = de.numpy(force=True)
+        dvals = None
 
 
     elif eng.name == "LATTE":
@@ -831,7 +913,6 @@ def get_evals_dvals_modules(
         # Filling the hamiltonian and overlap matrices with the flattened output arrays from the Fortran function
         for i in range(norbs):
             evects[:, i] = evectsFlat_out[norbs * i : norbs + norbs * i]
-
 
     return evects, evals, dvals
 
@@ -969,6 +1050,52 @@ def get_density_matrix_modules(
 
     elif eng.name == "DFTorch":
         print('testing DFTorch density matrix')
+        device = 'cuda'
+        pt = PeriodicTable()
+        ZNuc = np.zeros_like(types,dtype=np.int32)
+        n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
+        # Initializing the atomic numbers array
+        #atomicNumbers = np.zeros_like(types, dtype=np.int32)
+        # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
+        for i in range(len(types)):
+            atomicNumber = pt.get_atomic_number(symbols[types[i]])
+            ZNuc[i] = pt.numel[atomicNumber]
+            n_orb_per_atom[i] = pt.n_orb[atomicNumber]
+
+        n_orb_per_atom = torch.from_numpy(n_orb_per_atom).to(device=device)
+        atom_ids = torch.repeat_interleave(torch.arange(len(n_orb_per_atom), device=device), n_orb_per_atom)
+
+        S = torch.from_numpy(overlap).to(device=device)
+        H = torch.from_numpy(ham).to(device=device)
+        Z = fractional_matrix_power_symm(S, -0.5)
+        ZNuc = torch.from_numpy(ZNuc).to(device=device)
+
+        CoulPot = torch.from_numpy(vcouls).to(device=device)
+
+        #Hcoul = 0.5 * (Hcoul_diag.unsqueeze(1) * S + S * Hcoul_diag.unsqueeze)
+        #H = H0 + Hcoul
+
+        #symmetrize non-SCF Hamiltonian
+        #H = Z.T @ H @ Z
+        e, Q = torch.linalg.eigh(H)
+        kB = torch.tensor(8.61739e-5,dtype=e.dtype,device=e.device)
+        beta = 1.0 / (kB * etemp)
+        #mu = torch.tensor(0.6618,dtype=e.dtype,device=e.device)
+        #torch._dynamo.config.suppress_errors = True
+        f = 1.0 / (torch.exp(beta * (e - mu)) + 1)
+        Dorth = (Q * f.unsqueeze(-2)) @ Q.transpose(-2, -1)
+
+        D = Z @ Dorth @ Z.T
+        DS = 2.0 * torch.diag(D @ S)
+        q = -1.0 * ZNuc
+        q.scatter_add_(
+            0, atom_ids, DS
+        )
+
+        density_matrix = D.numpy(force=True)
+        charges = q.numpy(force=True)
+
+        return density_matrix, charges
 
     elif eng.name == "LATTE":
 

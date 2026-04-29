@@ -28,7 +28,7 @@ args = get_args()
 np.set_printoptions(threshold=sys.maxsize)
 
 # Initialize sdc parameters
-sdc, eng, comm, rank, numranks, sy, hindex, graphNL, graphweights, nl, nlTrX, nlTrY, nlTrZ = init(
+sdc, eng, comm, rank, numranks, sy, hindex, graphNL, graphweights = init(
     args
 )
 
