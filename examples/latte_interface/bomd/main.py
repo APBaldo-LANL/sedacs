@@ -12,7 +12,7 @@ import math
 import torch
 import numpy as np
 import gc
-
+import time
 torch.set_default_dtype(torch.float64)
 
 from sedacs.driver.init import init
@@ -98,9 +98,13 @@ def main(args):
     # Read the coordinates as tensors
     coords = torch.tensor(sy.coords)
     # Perform a graph-adaptive calculation of the charges with SCF cycles
+    tic = time.perf_counter()
     graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_KernelSCFDM(
         sdc, eng, comm, rank, numranks, sy, hindex, graphNL, mu, alpha=localization, graphweights=graphweights, device=device,
     )
+    toc = time.perf_counter()
+    print("Time for SCF", toc - tic, "(s)")
+
     njumps = 1
     partsCoreHalo = []
     for i in range(sdc.nparts):

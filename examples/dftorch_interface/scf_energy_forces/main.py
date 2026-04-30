@@ -17,7 +17,8 @@ from sedacs.driver.graph_adaptive_sp_energy_forces import get_adaptive_sp_energy
 from sedacs.driver.init import get_args, init
 from sedacs.file_io import read_latte_tbparams
 from sedacs.charges import get_charges
-
+import time
+ 
 from dftorch.Constants import Constants
 from dftorch.Structure import Structure
 import torch
@@ -103,11 +104,11 @@ dftorch_params = {
 LBOX = torch.tensor([21.83,21.83,21.83], device=device)
 
 sy.lbox = LBOX
-print(LBOX)
+#print(LBOX)
 
-print(vars(sdc))
+#print(vars(sdc))
 sdc.dftorch_params="/global/homes/a/abaldo2/DFTorch/experiments/sk_orig/mio-1-1/mio-1-1/"
-print(vars(sdc))
+#print(vars(sdc))
 
 
 
@@ -127,15 +128,18 @@ structure1 = Structure(
 
 sy.hubbard_u = structure1.Hubbard_U.numpy(force=True)
 
-print(sy.hubbard_u)
 sdc.verb = True
 
 
 # Perform a graph-adaptive calculation of the density matrix through SCF cycles
-mu = 6.00
+mu = 0.0
+tic = time.perf_counter()
 graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_KernelSCFDM(
     sdc, eng, comm, rank, numranks, sy, hindex, graphNL, mu, graphweights=graphweights
 )
+toc = time.perf_counter()
+print("Time for SCF", toc - tic, "(s)")
+
 # Perform a single-point graph-adaptive calculation of the energy and forces
 print('Converged mu and charges')
 print(mu)

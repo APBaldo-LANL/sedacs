@@ -180,7 +180,7 @@ def build_coul_ham_module(
 
 
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
-        #filename = "coords_1.xyz"
+        #filename = "coords_2.xyz"
         filename = "coords_1032.xyz"
       
         const = Constants(
@@ -209,17 +209,16 @@ def build_coul_ham_module(
 
         #print(Hcoul_diag)
         #print(type(Hcoul_diag))
-        Hcoul_diag = CoulPot_sr
+        #Hcoul_diag = CoulPot_sr
 
         Hcoul = 0.5 * (
             Hcoul_diag.unsqueeze(1) * S
             + S * Hcoul_diag.unsqueeze(0)
         )
-
-
         H = H0 + Hcoul
-        H = Z.T * H * Z
+        #H = Z.T * H * Z
         ham = H.numpy(force=True)
+        
 
 
     elif eng.name == "LATTE":
@@ -371,7 +370,7 @@ def get_hamiltonian_module(
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        #filename = "coords_1.xyz"
+        #filename = "coords_2.xyz"
         filename = "coords_1032.xyz"
 
 
@@ -527,7 +526,6 @@ def get_hamiltonian_module(
 
         Z = fractional_matrix_power_symm(S, -0.5)
         #symmetrize non-SCF Hamiltonian
-        #H0 = Z.T @ H0 @ Z
         #Dump tensors to cpu and convert to numpy arrays
         hamiltonian = H0.numpy(force=True)
         overlap = S.numpy(force=True)
@@ -755,37 +753,20 @@ def get_evals_dvals_modules(
 
     elif eng.name == "DFTorch":
         device='cuda'
+
         H = torch.from_numpy(ham).to(device=device)
-
-        if torch.sum(vcouls) = 0.0:
-            S = torch.from_numpy(overlap).to(device=device)
-            Z = fractional_matrix_power_symm(S, -0.5)
-            H = Z.T * H * Z
-            e, Q = torch.linalg.eigh(H)
-        else:
-            pt = PeriodicTable()
-            ZNuc = np.zeros_like(types,dtype=np.int32)
-            n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
-            atomicNumbers = np.zeros_like(types,dtype=np.int32)
-            # Initializing the atomic numbers array
-            #atomicNumbers = np.zeros_like(types, dtype=np.int32)
-            # Filling the atomic numbers array with the atomic numbers corresponding to the symbols
-            for i in range(len(types)):
-                atomicNumbers[i] = pt.get_atomic_number(symbols[types[i]])
-                ZNuc[i] = pt.numel[atomicNumbers[i]]
-                n_orb_per_atom[i] = pt.n_orb[atomicNumbers[i]]
-
-                n_orb_per_atom = torch.from_numpy(n_orb_per_atom).to(device=device)
-                atom_ids = torch.repeat_interleave(torch.arange(len(n_orb_per_atom), device=device), n_orb_per_atom)
-
-
-
-
+        S = torch.from_numpy(overlap).to(device=device)
+        Z = fractional_matrix_power_symm(S, -0.5)
+        H = Z.T @ H @ Z
+        e, Q = torch.linalg.eigh(H)
+        sorted_e, indices = torch.sort(e)
+        Q = Q[indices]
+        de = torch.sum(Q[:norbsInCore, :] **2, dim=0)
 
         evects = Q.numpy(force=True)
-        evals = e.numpy(force=True)
+        evals = sorted_e.numpy(force=True)
         dvals = de.numpy(force=True)
-        dvals = None
+        
 
 
     elif eng.name == "LATTE":
@@ -1076,13 +1057,17 @@ def get_density_matrix_modules(
         #H = H0 + Hcoul
 
         #symmetrize non-SCF Hamiltonian
-        #H = Z.T @ H @ Z
+        H = Z.T @ H @ Z
         e, Q = torch.linalg.eigh(H)
+
+        sorted_e, indices = torch.sort(e)
+        Q = Q[indices]
+
         kB = torch.tensor(8.61739e-5,dtype=e.dtype,device=e.device)
         beta = 1.0 / (kB * etemp)
         #mu = torch.tensor(0.6618,dtype=e.dtype,device=e.device)
         #torch._dynamo.config.suppress_errors = True
-        f = 1.0 / (torch.exp(beta * (e - mu)) + 1)
+        f = 1.0 / (torch.exp(beta * (sorted_e - mu)) + 1)
         Dorth = (Q * f.unsqueeze(-2)) @ Q.transpose(-2, -1)
 
         D = Z @ Dorth @ Z.T
