@@ -150,7 +150,7 @@ def get_singlePoint_energy_forces(
         norbs = subSy.norbs  # We have as many orbitals as columns in the Hamiltonian
         tmpArray = np.zeros(numberOfCoreAtoms)
         tmpArray[:] = subSy.orbs[subSy.types[0:numberOfCoreAtoms]]
-        norbsInCore = np.sum(tmpArray)
+        norbsInCore = int(np.sum(tmpArray))
         print("Number of orbitals in the core =", norbsInCore)
         nocc = int(float(subSy.numel) / 2.0)  # Get the total occupied orbitals
         subSy.ham, subSy.over, subSy.zmat = get_hamiltonian(
@@ -185,6 +185,7 @@ def get_singlePoint_energy_forces(
             norbsInCore=norbsInCore,
             mu=mu,
             etemp=sdc.etemp,
+            overlap=subSy.over,
             verb=False,
             newsystem=False,
         )

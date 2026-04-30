@@ -65,9 +65,9 @@ sdc, eng, comm, rank, numranks, sy, hindex, graphNL, graphweights  = init(
 
 
 
-#sy.latticeVectors = np.array([[15.459,0,0],[0,15.459,0],[0,0,15.459]])
+sy.latticeVectors = np.array([[15.459,0,0],[0,15.459,0],[0,0,15.459]])
 #sy.latticeVectors = np.array([[40.23,0,0],[0,40.23,0],[0,0,40.23]])
-sy.latticeVectors = np.array([[21.83,0,0],[0,21.83,0],[0,0,21.83]])
+#sy.latticeVectors = np.array([[21.83,0,0],[0,21.83,0],[0,0,21.83]])
 
 dftorch_params = {
     "UNRESTRICTED": False,
@@ -99,9 +99,9 @@ dftorch_params = {
     #"solvation_model": "gbsa",
 }
 
-#LBOX = torch.tensor([15.459,15.459,15.459], device=device)
+LBOX = torch.tensor([15.459,15.459,15.459], device=device)
 #LBOX = torch.tensor([40.23,40.23,40.23], device=device)
-LBOX = torch.tensor([21.83,21.83,21.83], device=device)
+#LBOX = torch.tensor([21.83,21.83,21.83], device=device)
 
 sy.lbox = LBOX
 #print(LBOX)
@@ -113,12 +113,12 @@ sdc.dftorch_params="/global/homes/a/abaldo2/DFTorch/experiments/sk_orig/mio-1-1/
 
 
 const = Constants(
-    'coords_1032.xyz',
+    'coords_2.xyz',
     sdc.dftorch_params,
 ).to(device)
 
 structure1 = Structure(
-    'coords_1032.xyz',
+    'coords_2.xyz',
     sy.lbox,
     const,
     charge=0,
@@ -132,7 +132,7 @@ sdc.verb = True
 
 
 # Perform a graph-adaptive calculation of the density matrix through SCF cycles
-mu = 0.0
+mu = 2.1452
 tic = time.perf_counter()
 graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_KernelSCFDM(
     sdc, eng, comm, rank, numranks, sy, hindex, graphNL, mu, graphweights=graphweights

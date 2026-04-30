@@ -180,11 +180,11 @@ def get_singlePoint_charges(
 
         toc = time.perf_counter()
         print("Time for get_hamiltonian", toc - tic, "(s)")
-        tic = time.perf_counter()
 
-        subSy.ham = build_coul_ham(eng,subSy.ham,sy.coulvs[partsCoreHalo[partIndex]],subSy.types,subSy.charges,False,subSy.hindex,subSy.symbols,overlap=subSy.over,verb=False)
-        toc = time.perf_counter()
-        print("Time for build_coul_ham", toc - tic, "(s)")
+        #tic = time.perf_counter()
+        #subSy.ham = build_coul_ham(eng,subSy.ham,sy.coulvs[partsCoreHalo[partIndex]],subSy.types,subSy.charges,False,subSy.hindex,subSy.symbols,overlap=subSy.over,verb=False)
+        #toc = time.perf_counter()
+        #print("Time for build_coul_ham", toc - tic, "(s)")
 
         tic = time.perf_counter()
         subSy.evects, evalsInPart, dvalsInPart = get_evals_dvals(
