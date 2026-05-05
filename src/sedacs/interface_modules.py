@@ -56,6 +56,9 @@ try:
     from dftorch._dm_fermi_x import dm_fermi_x
     from dftorch._energy import energy
     from dftorch._forces import Forces
+    from dftorch._atomic_density_matrix import atomic_density_matrix
+    from dftorch._repulsive_spline import get_repulsion_energy
+    from dftorch._forces import Forces
 except Exception as e:
     error_at("interface_modules", "DFTorch modules were not found")
 
@@ -1260,6 +1263,7 @@ def get_energy_forces_modules(
     numberOfCoreAtoms=None,
     mu=None,
     etemp=0.0,
+    overlap=None,
     verb=False,
     newsystem=True,
     keepmem=False,
@@ -1334,6 +1338,7 @@ def get_energy_forces_modules(
 
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
+        atomicNumbers = np.zeros_like(types,dtype=np.int32)
         n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
         # Initializing the atomic numbers array
         #atomicNumbers = np.zeros_like(types, dtype=np.int32)
@@ -1359,7 +1364,7 @@ def get_energy_forces_modules(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 5
+        CUTOFF = 8
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -1425,10 +1430,67 @@ def get_energy_forces_modules(
         num_p = const.n_p[TYPE]  # (Nr_atoms,)
         num_d = const.n_d[TYPE]  # (Nr_atoms,)
 
-        H_INDEX_START = torch.zeros(nats, dtype=torch.int64, device=device)
-        H_INDEX_START[1:] = torch.cumsum(self.n_orbitals_per_atom, dim=0)[:-1]
-
-
+# Build the neighborlist
+            
+        (
+            _,
+            _,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            _,
+            _,   
+            neighbor_I,
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
+        ) = vectorized_nearestneighborlist(
+            TYPE,
+            RX,
+            RY,
+            RZ,
+            LBox,
+            CUTOFF,
+            nats,
+            const,
+            upper_tri_only=False,  
+            remove_self_neigh=False,
+        )
+                
+        # Get Hamiltonian, Overlap, etc,
+        _, dH0, _, dS = H0_and_S_vectorized(
+            TYPE,
+            RX,
+            RY,
+            RZ,
+            diagonal, 
+            H_INDEX_START,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            const,
+            neighbor_I,
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
+            const.R_orb,
+            const.coeffs_tensor,
+            verbose=False,
+        )
+        del (
+            _,
+            nnRx,
+            nnRy,
+            nnRz,
+            nnType,
+            neighbor_I,  
+            neighbor_J,
+            IJ_pair_type,
+            JI_pair_type,
+        )
+        
         D0 = atomic_density_matrix(
             H_INDEX_START, HDIM, TYPE, const, has_p, has_d
         )
@@ -1471,11 +1533,11 @@ def get_energy_forces_modules(
             0, atom_ids, DS
         )
 
-
+        q_sr = q[atom_ids]
 
         ##################  Compute Energies ############################
         #Band Energy
-        if Rx.dim() == 1:  # non-batched
+        if RX.dim() == 1:  # non-batched
             D0_mat = torch.diag(D0)
         if D.dim() == 2:  # closed-shell
             factor = 2
@@ -1484,36 +1546,97 @@ def get_energy_forces_modules(
 
         Eband0 = factor * (H0 @ (D - D0_mat)).diagonal(offset=0, dim1=-2, dim2=-1).sum()
 
-        #Coul Energy
-        Ecoul = 0.5 * torch.sum(Hcoul_diag * q)
         print(f'Eband0: {Eband0}')
-        print(f'Ecoul: {Ecoul}')
+
+        # Entropy contribution
+        eps = 1e-7
+        mask = (f > eps) & (f < 1 - eps)  # (B, n_orb)
+        f_safe = f.clamp(eps, 1 - eps)  # avoid log(0)
+        term = f_safe * torch.log(f_safe) + (1 - f_safe) * torch.log(1 - f_safe)
+        term = term * mask  # zero out invalid entries
+
+        if RX.dim() == 1:  # non-batched. both cs and os.
+            S_ent = -kB * term.sum()
+        else:
+            S_ent = -kB * term.sum(dim=-1)  # (B,)
+
+        E_entropy = -2 * etemp * S_ent
+        print(f'E_Entropy: {E_entropy}')
+
+        # pair repulsive energy
+        repulsive_rcut = 6.0
+        e_repulsion, dVr  = (
+            get_repulsion_energy(
+                const.R_rep_tensor,
+                const.rep_splines_tensor,
+                TYPE,
+                RX,
+                RY,
+                RZ,
+                LBox,
+                repulsive_rcut,
+                nats,
+                const,
+                verbose=False,
+                )
+            )
+        print(f'E_repulsion: {e_repulsion}')
         #################################################################
 
+
+        ################## Compute Forces ###############################
+
+        # spoofed variables (to ignore coulombic contributions externally
+        e_field = torch.tensor([0.0, 0.0, 0.0], device=device)
+        C = torch.zeros(nats, nats, device=device)
+        dCC = torch.zeros(3, nats, nats, device=device)
         (
-            structure.e_elec_tot,
-            structure.e_band0,
-            structure.e_coul,
-            structure.e_dipole,
-            structure.e_entropy,
-            structure.s_ent,
-        ) = energy(
-            Structure.H0,
-            structure.Hubbard_U,
-            structure.e_field,
-            structure.D0,
-            structure.C,
-            structure.dq_p1,
-            structure.D,
-            structure.q,
-            structure.RX,
-            structure.RY,
-            structure.RZ,
-            structure.f,
-            structure.Te,
-            structure.dU_dq,
-            thirdorder=structure.thirdorder,
-        )
+                    f_tot,
+                    f_coul,
+                    f_band0,
+                    f_dipole,
+                    f_pulay,
+                    f_s_coul,
+                    f_s_dipole,
+                    f_rep,
+                ) = Forces(
+                    H,
+                    Z,
+                    C,
+                    D,
+                    D0,
+                    dH0,
+                    dS,
+                    dCC,
+                    dVr,
+                    e_field,
+                    Hubbard_U,
+                    q,
+                    RX,
+                    RY,
+                    RZ,
+                    nats,
+                    const,
+                    TYPE,
+                )
+        print(f'f_tot: {f_tot}')
+        print(f'f_coul: {f_coul}')
+        print(f'f_band0: {f_band0}')
+        print(f'f_dipole: {f_dipole}')
+
+        print(f'f_pulay: {f_pulay}')
+        print(f'f_s_coul: {f_s_coul}')
+        print(f'f_s_dipole: {f_s_dipole}')
+        print(f'f_rep: {f_rep}')
+
+        print(f'dH0: {dH0}')
+        print(f'dS: {dS}')
+        #################################################################
+
+
+        energy = 0
+        forces = 0
+        return energy, forces
 
 
     elif eng.name == "LATTE":
