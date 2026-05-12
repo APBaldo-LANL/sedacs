@@ -1,0 +1,11 @@
+TITLE  PDB written by SEDACS
+CRYST1   10.000   10.000   10.000  90.00  90.00  90.00 P 1           1
+MODEL
+ATOM      1  H   MOL     1      0.024  15.424  0.000  1.00  0.00           H
+ATOM      2  O   MOL     1      0.965  0.020  0.000  1.00  0.00           O
+ATOM      3  H   MOL     1      1.141  14.552  0.000  1.00  0.00           H
+ATOM      4  H   MOL     1      1.462  1.513  1.709  1.00  0.00           H
+ATOM      5  O   MOL     1      2.404  1.568  1.709  1.00  0.00           O
+ATOM      6  H   MOL     1      2.579  0.641  1.709  1.00  0.00           H
+TER
+END

@@ -145,8 +145,9 @@ print('Converged mu and charges')
 print(mu)
 print(sy.charges)
 
-graphDH, sy.charges, energy, forces, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_sp_energy_forces(
+graphDH, sy.charges, energy, entropy, forces, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_sp_energy_forces(
     sdc, eng, comm, rank, numranks, sy, parts, partsCoreHalo, hindex, graphNL, mu
 )
 print("total energy:", energy)
-print("forces:", forces[0])
+print("forces:", forces)
+print("charges:", sy.charges)

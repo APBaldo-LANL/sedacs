@@ -220,8 +220,8 @@ def get_singlePoint_charges(
         fullEvals = evalsOnRank
         fullDvals = dvalsOnRank
     # Calculate the global chemical potential from the evals and dvals collected from all subsystems
-    print(fullEvals)
-    print(fullDvals)
+    #print(fullEvals)
+    #print(fullDvals)
     mu = get_mu(
         mu,
         fullEvals,

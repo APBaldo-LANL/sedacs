@@ -2,9 +2,9 @@
 
 Verbosity= True
 Threshold= 1.0E-7
-CoordsFile= coords_1299.pdb
+#CoordsFile= coords_1299.pdb
 #CoordsFile= algo.xyz
-#CoordsFile= coords_2955.pdb 
+CoordsFile= coords_2.pdb 
 #CoordsFile= coords_100.pdb 
 #CoordsFile= water_128.xyz 
 GraphThreshold= 0.01 
@@ -13,7 +13,8 @@ Rcut= 4.0 #Radius cutoff
 PartitionType= Metis
 #PartitionType= Regular
 #PartitionType= MinCut
-NumParts= 48 
+#NumParts= 48 
+NumParts= 2
 SCFTol= 1.0E-10
 Overlap= True 
 ElectronicTemperature= 1000

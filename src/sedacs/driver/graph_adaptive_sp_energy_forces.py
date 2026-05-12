@@ -381,7 +381,6 @@ def get_adaptive_sp_energy_forces(
         sy.coulvs = comm.bcast(sy.coulvs, root=0)
         ecoul = comm.bcast(ecoul, root=0)
         fcoul = comm.bcast(fcoul, root=0)
-    print(f'printing ecoul: {ecoul}')
     fullGraph, charges, energy, entropy, forces, subSysOnRank, mu = (
         get_singlePoint_energy_forces(
             sdc, eng, rank, numranks, comm, parts, partsCoreHalo, sy, graph, mu, alpha=alpha,
