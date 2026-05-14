@@ -168,6 +168,7 @@ def build_coul_ham_module(
     elif eng.name == "DFTorch":
         print('Building DFTorch Hcoul .... ')
         device = 'cuda'
+        #device = 'cpu'
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
         n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
@@ -185,8 +186,9 @@ def build_coul_ham_module(
 
 
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
+        filename = "COORD_8WATER.xyz"
         #filename = "coords_2.xyz"
-        filename = "coords_1032.xyz"
+        #filename = "coords_1032.xyz"
       
         const = Constants(
             filename,
@@ -375,7 +377,8 @@ def get_hamiltonian_module(
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        filename = "coords_2.xyz"
+        filename = "COORD_8WATER.xyz"
+        #filename = "coords_2.xyz"
         #filename = "coords_1032.xyz"
 
 
@@ -400,7 +403,7 @@ def get_hamiltonian_module(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 5
+        CUTOFF = 8
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -784,7 +787,8 @@ def get_evals_dvals_modules(
             Hcoul_diag.unsqueeze(1) * S
             + S * Hcoul_diag.unsqueeze(0)
         )
-
+        print('Hcoul_diag', Hcoul_diag)
+        
         H = H0 + Hcoul
 
         H_orth = Z.T @ H @ Z
@@ -1060,6 +1064,7 @@ def get_density_matrix_modules(
     elif eng.name == "DFTorch":
         print('testing DFTorch density matrix')
         device = 'cuda'
+        #device = 'cpu'
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
         n_orb_per_atom = np.zeros_like(types,dtype=np.int32)
@@ -1108,6 +1113,7 @@ def get_density_matrix_modules(
         density_matrix = D.numpy(force=True)
         charges = q.numpy(force=True)
 
+        #print('DFtorch DM: ', density_matrix)
         return density_matrix, charges
 
     elif eng.name == "LATTE":
@@ -1230,7 +1236,7 @@ def get_density_matrix_modules(
         for i in range(norbs):
             density_matrix[:, i] = dmFlat_out[norbs * i : norbs + norbs * i]
         charges[:] = chargesFlat_out[:]
-
+        #print('latte DM: ', density_matrix)
         return density_matrix, charges
 
     if full_data:
@@ -1320,13 +1326,13 @@ def get_energy_forces_modules(
 
         print('testing DFTorch Energies and Forces')
         device = 'cuda'
-
+        #device = 'cpu'
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        #filename = "coords_2.xyz"
-        filename = "coords_1032.xyz"
+        filename = "COORD_8WATER.xyz"
+        #filename = "coords_1032.xyz"
 
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
@@ -1536,10 +1542,12 @@ def get_energy_forces_modules(
             factor = 2
         else:  # open-shell
             factor = 1
-
+        D_shift = D - D0_mat
         Eband0 = factor * (H0[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
-
-        #print(f'Eband0: {Eband0}')
+        Eband0 = factor * (H[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
+        #Eband0 = factor * (H0[:norbsInCore] * D_shift[:norbsInCore]).sum()
+        #Eband0 = factor *(H0 * D_shift).sum()
+        print(f'Eband0: {Eband0}')
 
         # Entropy contribution
         #eps = 1e-7
@@ -1590,6 +1598,7 @@ def get_energy_forces_modules(
                 verbose=False,
                 )
             )
+        #print("E Rep full: ", ERep)
         #################################################################
 
 
@@ -1605,7 +1614,7 @@ def get_energy_forces_modules(
         q_spoofed = torch.ones(nats, device=device) # assures ColPot = C*q == U*q + ColPot
         U_spoofed = torch.zeros(nats, device=device) # 0*1 + ColPot => ColPot
         (
-                    F_TOT,
+                    _,
                     f_coul,
                     f_band0,
                     f_dipole,
@@ -1633,22 +1642,29 @@ def get_energy_forces_modules(
                     const,
                     TYPE,
                 )
-        #print(f'f_tot: {F_TOT}')
+        #print('DFtorch Forces', F_TOT)
+        #print('DFTorch Core Forces: ',F_TOT[:, :numberOfCoreAtoms])
         #print(f'f_coul: {f_coul}')
-        #print(f'f_band0: {f_band0}')
-        #print(f'f_dipole: {f_dipole}')
+        print(f'f_band0: {f_band0.T}')
+        print(f'f_dipole: {f_dipole}')
 
-        #print(f'f_pulay: {f_pulay}')
-        #print(f'f_s_coul: {f_s_coul}')
-        #print(f'f_s_dipole: {f_s_dipole}')
-        #print(f'f_rep: {f_rep}')
+        print(f'f_pulay: {f_pulay.T}')
+        print(f'f_s_coul: {f_s_coul.T}')
+        print(f'f_s_dipole: {f_s_dipole}')
+        print(f'f_rep: {f_rep.T}')
+
+        F_TOT = f_s_coul[:, :numberOfCoreAtoms] + f_band0[:, :numberOfCoreAtoms] + f_pulay[:, :numberOfCoreAtoms] + f_rep[:, :numberOfCoreAtoms]
         #################################################################
 
         EPOT = Eband0 + ERep # Ecoul,E_entropy calculated in SEDACS and Edipole = NULL for now
-        FORCES = F_TOT[:numberOfCoreAtoms] # missing Fcoul; calculated in SEDACS. Output only Core contributions
+        #FORCES = F_TOT[:, : numberOfCoreAtoms] # missing Fcoul; calculated in SEDACS. Output only Core contributions
+        #FORCES = F_TOT
+        #print('Ftot', FORCES)
         energy = EPOT.numpy(force=True) 
         forces = F_TOT.numpy(force=True)
         forces = forces.T
+
+        print('DFTorch energies:',energy)
         return energy, forces
 
 
@@ -1774,6 +1790,9 @@ def get_energy_forces_modules(
 
     else:
         error_at("get_energy_force_modules", "No specific engine type defined")
+    
+    print('LATTE energies', energyFlat_out[0])
+    print('LATTE forces', forces)
 
     return energyFlat_out[0], forces
 

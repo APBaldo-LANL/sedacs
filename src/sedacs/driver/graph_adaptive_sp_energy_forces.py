@@ -390,10 +390,11 @@ def get_adaptive_sp_energy_forces(
     fullGraph = symmetrize_graph(fullGraph)
     if shadow_md:
         fcoul = ((2 * charges - sy.charges) / sy.charges)[:, None] * fcoul
-        
-    energy = energy - ecoul
+    print("ecoul: ", 1.0 * ecoul)
+    energy = energy - 1.0 * ecoul
     forces = forces + fcoul
-
+    print('compiled energies:',energy)
+    print('compiles forces:', forces)
     if write_parts and rank == 0:
         AtToPrint = 0
 

@@ -79,13 +79,13 @@ def main(args):
     element_type = np.array(sy.symbols)[sy.types]
     # Load the LATTE tight-binding parameters
     latte_tbparams = read_latte_tbparams(
-       "../../../parameters/latte/TBparam/electrons.dat"
+       "../../../../parameters/latte/TBparam/electrons.dat"
     )
     # Get the Hubbard U values for each atom in the system
     Hubbard_U = [latte_tbparams[symbol]["HubbardU"] for symbol in sy.symbols]
     Hubbard_U = np.array(Hubbard_U)[sy.types]
     sy.hubbard_u = Hubbard_U 
-    print('LATTE hubbard Us:' sy.hubbard_u)
+    print('LATTE hubbard Us:', sy.hubbard_u)
     # Get the atomic masses for each atom in the system
     Mnuc = [pt.mass[pt.get_atomic_number(symbol)] for symbol in sy.symbols]
     Mnuc = np.array(Mnuc)[sy.types]
@@ -105,7 +105,7 @@ def main(args):
     )
     toc = time.perf_counter()
     print("Time for SCF", toc - tic, "(s)")
-    print('SCF charges:' sy.charges)
+    print('SCF charges:', sy.charges)
     njumps = 1
     partsCoreHalo = []
     for i in range(sdc.nparts):

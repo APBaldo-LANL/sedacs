@@ -107,7 +107,8 @@ def main(args):
     # Get the atomic symbols for each atom in the system
     element_type = np.array(sy.symbols)[sy.types]
     # DFtorch params
-    sy.latticeVectors = np.array([[15.459,0,0],[0,15.459,0],[0,0,15.459]])
+    sy.latticeVectors = np.array([[8.0,0,0],[0,8.0,0],[0,0,8.0]])
+    #sy.latticeVectors = np.array([[15.459,0,0],[0,15.459,0],[0,0,15.459]])
     #sy.latticeVectors = np.array([[40.23,0,0],[0,40.23,0],[0,0,40.23]])
     #sy.latticeVectors = np.array([[21.83,0,0],[0,21.83,0],[0,0,21.83]])
 
@@ -141,7 +142,8 @@ def main(args):
         #"solvation_model": "gbsa",
     }
 
-    LBOX = torch.tensor([15.459,15.459,15.459], device=device)
+    LBOX = torch.tensor([8.0,8.0,8.0], device=device)
+    #LBOX = torch.tensor([15.459,15.459,15.459], device=device)
     #LBOX = torch.tensor([40.23,40.23,40.23], device=device)
     #LBOX = torch.tensor([21.83,21.83,21.83], device=device)
 
@@ -155,12 +157,12 @@ def main(args):
 
 
     const = Constants(
-        'coords_2.xyz',
+        'COORD_8WATER.xyz',
         sdc.dftorch_params,
     ).to(device)
 
     structure1 = Structure(
-        'coords_2.xyz',
+        'COORD_8WATER.xyz',
          sy.lbox,
          const,
          charge=0,
@@ -169,7 +171,7 @@ def main(args):
     )
 
     sy.hubbard_u = structure1.Hubbard_U.numpy(force=True)
-
+    print('DFTorch Hubbard Us: ', sy.hubbard_u)
 
     # Get the atomic masses for each atom in the system
     Mnuc = [pt.mass[pt.get_atomic_number(symbol)] for symbol in sy.symbols]
@@ -417,7 +419,7 @@ def main(args):
         # Constant shift in charges to maintain exact charge neutrality
         #q = q - (torch.sum(q)/len(q))
         # Convert the energy and forces to tensors
-        EPOT = torch.tensor(EPOT + entropy)
+        EPOT = torch.tensor(EPOT)
         FTOT = torch.tensor(FTOT)
 
         # dR2(1)/dt2: V(1/2)->V(1)
