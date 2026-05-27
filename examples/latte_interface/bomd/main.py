@@ -85,7 +85,6 @@ def main(args):
     Hubbard_U = [latte_tbparams[symbol]["HubbardU"] for symbol in sy.symbols]
     Hubbard_U = np.array(Hubbard_U)[sy.types]
     sy.hubbard_u = Hubbard_U 
-    print('LATTE hubbard Us:' sy.hubbard_u)
     # Get the atomic masses for each atom in the system
     Mnuc = [pt.mass[pt.get_atomic_number(symbol)] for symbol in sy.symbols]
     Mnuc = np.array(Mnuc)[sy.types]
@@ -105,7 +104,6 @@ def main(args):
     )
     toc = time.perf_counter()
     print("Time for SCF", toc - tic, "(s)")
-    print('SCF charges:' sy.charges)
     njumps = 1
     partsCoreHalo = []
     for i in range(sdc.nparts):
@@ -176,6 +174,7 @@ def main(args):
     unwrap_coords = coords.clone().detach().double()
 
     renew = 0
+    performance = 0
     # MAIN MD LOOP {dR2(0)/dt2: V(0)->V(1/2); dn2(0)/dt2: n(0)->n(1); V(1/2): R(0)->R(1); dR2(1)/dt2: V(1/2)->V(1)}
     for MD_step in range(MD_Iter):
         # Calculate kinetic energy from particle velocities
@@ -187,9 +186,9 @@ def main(args):
         # Current time
         Time = (MD_step) * dt
         print(
-            f"Time = {Time:<16.8f} Etotal = {ETOT:<16.8f} Temperature = {Temperature:<16.8f} SUM(q[n]) = {torch.sum(q).item():<16.16f}"
+            f"Time = {Time:<16.8f} Etotal = {ETOT:<16.8f} Temperature = {Temperature:<16.8f} SUM(q[n]) = {torch.sum(q).item():<16.16f} Performance = {performance:.3f}"
         )
-
+        tic = time.perf_counter()
         # dR2(0)/dt2: V(0)->V(1/2)
         V = V + 0.5 * dt * F2V * FTOT / Mnuc.unsqueeze(1)  # - 0.2 * V
         if rank == 0:
@@ -337,6 +336,8 @@ def main(args):
 
         # dR2(1)/dt2: V(1/2)->V(1)
         V = V + 0.5 * dt * F2V * FTOT / Mnuc.unsqueeze(1)
+        toc = time.perf_counter()
+        performance = toc - tic
     if rank == 0:
         MD_xyz.close()
         Energy_dat.close()

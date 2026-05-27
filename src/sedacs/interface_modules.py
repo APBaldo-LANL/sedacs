@@ -186,9 +186,9 @@ def build_coul_ham_module(
 
 
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
-        filename = "COORD_8WATER.xyz"
+        #filename = "COORD_8WATER.xyz"
         #filename = "coords_2.xyz"
-        #filename = "coords_1032.xyz"
+        filename = "coords_1032.xyz"
       
         const = Constants(
             filename,
@@ -377,9 +377,9 @@ def get_hamiltonian_module(
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        filename = "COORD_8WATER.xyz"
+        #filename = "COORD_8WATER.xyz"
         #filename = "coords_2.xyz"
-        #filename = "coords_1032.xyz"
+        filename = "coords_1032.xyz"
 
 
 
@@ -403,7 +403,7 @@ def get_hamiltonian_module(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 8
+        CUTOFF = 12
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -787,7 +787,7 @@ def get_evals_dvals_modules(
             Hcoul_diag.unsqueeze(1) * S
             + S * Hcoul_diag.unsqueeze(0)
         )
-        print('Hcoul_diag', Hcoul_diag)
+        #print('Hcoul_diag', Hcoul_diag)
         
         H = H0 + Hcoul
 
@@ -1331,8 +1331,8 @@ def get_energy_forces_modules(
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
-        filename = "COORD_8WATER.xyz"
-        #filename = "coords_1032.xyz"
+        #filename = "COORD_8WATER.xyz"
+        filename = "coords_1032.xyz"
 
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
@@ -1362,7 +1362,7 @@ def get_energy_forces_modules(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 8
+        CUTOFF = 12
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -1544,8 +1544,8 @@ def get_energy_forces_modules(
             factor = 1
         D_shift = D - D0_mat
         Eband0 = factor * (H0[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
-        Eband0 = factor * (H[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
-        #Eband0 = factor * (H0[:norbsInCore] * D_shift[:norbsInCore]).sum()
+        #Eband0 = factor * (H[:norbsInCore] @ (D - D0_mat)[:norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
+        Eband0 = factor * (H[: norbsInCore] * D_shift[: norbsInCore]).sum()
         #Eband0 = factor *(H0 * D_shift).sum()
         print(f'Eband0: {Eband0}')
 
@@ -1567,7 +1567,7 @@ def get_energy_forces_modules(
         # pair repulsive energy
         # Initially only calculate energy contribution due to Core and then calculated DVr for Core+Halo
         repulsive_rcut = 6.0
-        ERep, _  = (
+        ERep_CC, _  = (
             get_repulsion_energy(
                 const.R_rep_tensor,
                 const.rep_splines_tensor,
@@ -1582,7 +1582,46 @@ def get_energy_forces_modules(
                 verbose=False,
                 )
             )
-        #print(f'E_repulsion: {ERep}')
+        print('ERep_CC: ',ERep_CC)
+        halo_atoms = nats - numberOfCoreAtoms
+        if halo_atoms != 0:
+            print('number of halo atoms: ', halo_atoms)
+            index = numberOfCoreAtoms + 1
+            ERep_HH, _  = (
+                get_repulsion_energy(
+                    const.R_rep_tensor,
+                    const.rep_splines_tensor,
+                    TYPE[numberOfCoreAtoms:],
+                    RX[numberOfCoreAtoms:],
+                    RY[numberOfCoreAtoms:],
+                    RZ[numberOfCoreAtoms:],
+                    LBox,
+                    repulsive_rcut,
+                    halo_atoms,
+                    const,
+                    verbose=False,
+                    )
+                )
+            ERep_ALL, _  = (
+                get_repulsion_energy(
+                    const.R_rep_tensor,
+                    const.rep_splines_tensor,
+                    TYPE,
+                    RX,
+                    RY,
+                    RZ,
+                    LBox,
+                    repulsive_rcut,
+                    nats,
+                    const,
+                    verbose=False,
+                    )
+                )
+            ERep_CH = ERep_ALL - ERep_HH - ERep_CC
+            ERep = ERep_CC + 0.5 * (ERep_CH)
+        else:
+            ERep = ERep_CC
+
         _, dVr  = (
             get_repulsion_energy(
                 const.R_rep_tensor,
@@ -1598,6 +1637,7 @@ def get_energy_forces_modules(
                 verbose=False,
                 )
             )
+        print(f'E_repulsion: {ERep}')
         #print("E Rep full: ", ERep)
         #################################################################
 
@@ -1614,7 +1654,7 @@ def get_energy_forces_modules(
         q_spoofed = torch.ones(nats, device=device) # assures ColPot = C*q == U*q + ColPot
         U_spoofed = torch.zeros(nats, device=device) # 0*1 + ColPot => ColPot
         (
-                    _,
+                    F_TOT,
                     f_coul,
                     f_band0,
                     f_dipole,
@@ -1645,26 +1685,27 @@ def get_energy_forces_modules(
         #print('DFtorch Forces', F_TOT)
         #print('DFTorch Core Forces: ',F_TOT[:, :numberOfCoreAtoms])
         #print(f'f_coul: {f_coul}')
-        print(f'f_band0: {f_band0.T}')
-        print(f'f_dipole: {f_dipole}')
+        #print(f'f_band0: {f_band0.T[:numberOfCoreAtoms]}')
+        #print(f'f_dipole: {f_dipole}')
 
-        print(f'f_pulay: {f_pulay.T}')
-        print(f'f_s_coul: {f_s_coul.T}')
-        print(f'f_s_dipole: {f_s_dipole}')
-        print(f'f_rep: {f_rep.T}')
+        #print(f'f_pulay: {f_pulay.T[:numberOfCoreAtoms]}')
+        #print(f'f_s_coul: {f_s_coul.T[:numberOfCoreAtoms]}')
+        #print(f'f_s_dipole: {f_s_dipole}')
+        #print(f'f_rep: {f_rep.T[:numberOfCoreAtoms]}')
 
-        F_TOT = f_s_coul[:, :numberOfCoreAtoms] + f_band0[:, :numberOfCoreAtoms] + f_pulay[:, :numberOfCoreAtoms] + f_rep[:, :numberOfCoreAtoms]
+        F_TOT = f_s_coul[:numberOfCoreAtoms] + f_band0[:numberOfCoreAtoms] + f_pulay[:numberOfCoreAtoms] + f_rep[:numberOfCoreAtoms]
         #################################################################
 
         EPOT = Eband0 + ERep # Ecoul,E_entropy calculated in SEDACS and Edipole = NULL for now
-        #FORCES = F_TOT[:, : numberOfCoreAtoms] # missing Fcoul; calculated in SEDACS. Output only Core contributions
+        #EPOT = Eband0
+        #FORCES = F_TOT[:numberOfCoreAtoms] # missing Fcoul; calculated in SEDACS. Output only Core contributions
         #FORCES = F_TOT
         #print('Ftot', FORCES)
         energy = EPOT.numpy(force=True) 
         forces = F_TOT.numpy(force=True)
         forces = forces.T
 
-        print('DFTorch energies:',energy)
+        #print('DFTorch energies:',energy)
         return energy, forces
 
 
