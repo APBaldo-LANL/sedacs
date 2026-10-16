@@ -4,9 +4,11 @@ matrix together with a full self-consistent charge
 optimization"""
 
 import sys
+import tblite
+from tblite.interface import Calculator
 
 import numpy as np
-from sedacs.driver.graph_adaptive_scf import get_adaptiveSCFDM
+from sedacs.driver.graph_adaptive_kernel_scf import get_adaptive_KernelSCFDM
 from sedacs.driver.init import get_args, init
 from sedacs.file_io import read_xtb_tbparams
 import sedacs.globals as gl
@@ -19,7 +21,10 @@ args = get_args()
 np.set_printoptions(threshold=sys.maxsize)
 
 # Initialize sdc parameters
-sdc, eng, comm, rank, numranks, sy, hindex, graphNL, nl, nlTrX, nlTrY, nlTrZ = init(args)
+sdc, eng, comm, rank, numranks, sy, hindex, graphNL, graphweights = init(
+    args
+)
+
 
 sdc.verb = True
 
@@ -32,7 +37,7 @@ sy.hubbard_u = Hubbard_U
 
 # Perform a graph-adaptive calculation of the density matrix
 mu = 0.0
-graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptiveSCFDM(
+graphDH, sy.charges, mu, parts, partsCoreHalo, subSysOnRank = get_adaptive_KernelSCFDM(
     sdc, eng, comm, rank, numranks, sy, hindex, graphNL, mu)
 
 

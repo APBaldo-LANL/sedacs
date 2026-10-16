@@ -1,0 +1,12 @@
+short_nbr: 0.19 ms
+hippynn: 9.8 ms
+long_nbr_update: 0.21 ms
+disp_dist: 0.39 ms
+ChEQ + Ewald: 1.1e+01 ms
+Energy + Force: 2.2e+01 ms
+  Shadow setup: 1.6 ms
+  Shadow Solver: 6.9 ms
+  Shadow End: 1.9 ms
+Avg. Num. MatVec: 5.00
+Avg. Num. Short Reneighbor: 0.03
+Avg. Num. Long Reneighbor: 0.03

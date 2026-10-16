@@ -6,9 +6,8 @@ Routines to handle the interface with the engines.
 
 import ctypes
 import os
-import torch
-import torch._dynamo
 import json
+import time
 
 import numpy as np
 from sedacs.message import *
@@ -18,7 +17,7 @@ import sys
 from sedacs.engine import Engine
 from sedacs.globals import *
 from sedacs.types import ArrayLike
-
+from sedacs.charges import get_charges
 # import the shared library
 try:
     fortlibFileName = os.environ["PROXYA_FORTRAN_PATH"] + "/proxya_fortran.so"
@@ -40,12 +39,17 @@ if (not fortlib) and (not pylib):
 try:
     from tblite.interface import Calculator
     xtblib = True
+    print('xtblib = ',xtblib)
 except Exception as e:
     xtblib = False
+    print('xtblib = ',xtblib)
 
 try:
+    import torch
+    import torch._dynamo
     from dftorch.Constants import Constants
     from dftorch.Structure import Structure
+    from dftorch._bond_integral import get_skf_tensors
     from dftorch._h0ands import H0_and_S_vectorized
     from dftorch._coulomb_matrix import coulomb_matrix_vectorized
     from dftorch._nearestneighborlist import (
@@ -105,7 +109,7 @@ def init_proxy(symbols,orbs):
 
 
 def build_coul_ham_module(
-    eng, ham0, vcouls, types, charges, orbital_based, hindex, symbols, overlap=None, verb=False
+    eng, ham0, vcouls, types, charges, orbital_based, hindex, overlap=None, verb=False
 ):
     """
     Interface to call external engine for adding Coulomb potential to the Hamiltonian matrix.
@@ -166,7 +170,7 @@ def build_coul_ham_module(
         )
 
     elif eng.name == "DFTorch":
-        print('Building DFTorch Hcoul .... ')
+        #print('Building DFTorch Hcoul .... ')
         device = 'cuda'
         #device = 'cpu'
         pt = PeriodicTable()
@@ -188,8 +192,11 @@ def build_coul_ham_module(
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
         #filename = "COORD_8WATER.xyz"
         #filename = "coords_2.xyz"
-        filename = "coords_1032.xyz"
-      
+        #filename = "coords_1032.xyz"
+        #filename = 'meth_o2_10k_rel.xyz'
+        #filename = 'meth_o2_2k.xyz'
+        filename = os.getenv("DFTORCH_STRUCTURE_FILE")
+
         const = Constants(
             filename,
             params_dir,
@@ -369,21 +376,35 @@ def get_hamiltonian_module(
 
     elif eng.name == "DFTorch":
 
-        print("testing non SCF DFTorch Hamiltonian")
+        class Constants_test(torch.nn.Module):
+
+            def __init__(self,label,norb):
+                self.label = label
+                self.norb = norb
+
+                super().__init__()
+
+   
+
+        #print("testing non SCF DFTorch Hamiltonian")
         device="cuda"
 
-
+        tic=time.perf_counter()
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
         if params_dir is None:
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
         #filename = "COORD_8WATER.xyz"
         #filename = "coords_2.xyz"
-        filename = "coords_1032.xyz"
-
+        #filename = "coords_1032.xyz"
+        #filename = 'meth_o2_10k_rel.xyz'
+        #filename = 'meth_o2_2k.xyz'
+        filename = os.getenv("DFTORCH_STRUCTURE_FILE")
 
 
         pt = PeriodicTable()
+        print("pt symbols",pt.symbols)
+        print("pt norbs",pt.n_orb)
 
         # Initializing the atomic numbers array
         atomicNumbers = np.zeros_like(types, dtype=np.int32)
@@ -403,7 +424,7 @@ def get_hamiltonian_module(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 12
+        CUTOFF = 6
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -469,8 +490,35 @@ def get_hamiltonian_module(
         num_p = const.n_p[TYPE]  # (Nr_atoms,)
         num_d = const.n_d[TYPE]  # (Nr_atoms,)
 
+        toc=time.perf_counter()
+        print("HO time for pre-neighborlist:", toc - tic, "(s)")
         # Build the neighborlist
-            
+
+        const = Constants_test(pt.symbols,pt.n_orb).to(device)
+        (
+            R_tensor,
+            R_orb,
+            coeffs_tensor,
+            R_rep_tensor,
+            rep_splines_tensor,
+            close_exp_tensor,
+            N_ORB,
+            MAX_ANG,
+            MAX_ANG_OCC,
+            TORE,
+            N_S,
+            N_P,
+            N_D,
+            ES,
+            EP,
+            ED,
+            US,
+            UP,
+            UD,
+        ) = get_skf_tensors(TYPE, os.getenv("DFTORCH_PARAMS_PATH"))
+
+
+        tic = time.perf_counter()    
         (
             _,
             _,
@@ -496,7 +544,9 @@ def get_hamiltonian_module(
             upper_tri_only=False,  
             remove_self_neigh=False,
         )
-                
+        toc = time.perf_counter()
+        print("HO time for neighborlist:", toc - tic, "(s)")
+        tic = time.perf_counter()        
         # Get Hamiltonian, Overlap, etc,
         H0, dH0, S, dS = H0_and_S_vectorized(
             TYPE,
@@ -514,8 +564,8 @@ def get_hamiltonian_module(
             neighbor_J,
             IJ_pair_type,
             JI_pair_type,
-            const.R_orb,
-            const.coeffs_tensor,
+            R_orb,
+            coeffs_tensor,
             verbose=False,
         )
         del (
@@ -529,7 +579,8 @@ def get_hamiltonian_module(
             IJ_pair_type,
             JI_pair_type,
         )
-
+        toc = time.perf_counter()
+        print("HO time for H0_n_S:", toc - tic, "(s)")
 
 
         Z = fractional_matrix_power_symm(S, -0.5)
@@ -1022,6 +1073,17 @@ def get_density_matrix_modules(
                 full_data=full_data,
                 verb=False,
             )
+
+            charges = get_charges(
+                density_matrix,
+                subSy.znuc,
+                types,
+                parts[partIndex],
+                subSy.hindex,
+                overlap=overlap,
+                verb=True,
+            )
+
         else:
             density_matrix = get_density_matrix_proxy(
                 ham,
@@ -1034,6 +1096,7 @@ def get_density_matrix_modules(
                 full_data=full_data,
                 verb=False,
             )
+        #print(density_matrix)
     elif eng.name == "ProxyAFortran":
         # H needs to be flattened
         norbs = len(ham[:, 0])
@@ -1062,7 +1125,7 @@ def get_density_matrix_modules(
         )
 
     elif eng.name == "DFTorch":
-        print('testing DFTorch density matrix')
+        #print('testing DFTorch density matrix')
         device = 'cuda'
         #device = 'cpu'
         pt = PeriodicTable()
@@ -1324,7 +1387,7 @@ def get_energy_forces_modules(
 
     elif eng.name == "DFTorch":
 
-        print('testing DFTorch Energies and Forces')
+        #print('testing DFTorch Energies and Forces')
         device = 'cuda'
         #device = 'cpu'
         params_dir = os.getenv("DFTORCH_PARAMS_PATH")
@@ -1332,7 +1395,10 @@ def get_energy_forces_modules(
             raise TypeError("No DFTorch parameter files detected. Check if environment variable 'DFTORCH_PARAMS_PATH' is set correctly.")
 
         #filename = "COORD_8WATER.xyz"
-        filename = "coords_1032.xyz"
+        #filename = "coords_1032.xyz"
+        #filename = 'meth_o2_10k_rel.xyz'
+        #filename = 'meth_o2_2k.xyz'
+        filename = os.getenv("DFTORCH_STRUCTURE_FILE")
 
         pt = PeriodicTable()
         ZNuc = np.zeros_like(types,dtype=np.int32)
@@ -1362,7 +1428,7 @@ def get_energy_forces_modules(
         RZ = torch.from_numpy(zcoord).to(device=device)
         TYPE = torch.from_numpy(atomicNumbers).to(device=device)
 
-        CUTOFF = 12
+        CUTOFF = 6
         pt.label=pt.symbols
         LBox = torch.tensor([latticeVectors[0,0], latticeVectors[1,1],latticeVectors[2,2]], device=device)
 
@@ -1543,11 +1609,11 @@ def get_energy_forces_modules(
         else:  # open-shell
             factor = 1
         D_shift = D - D0_mat
-        Eband0 = factor * (H0[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
+        #Eband0 = factor * (H0[:norbsInCore] @ (D - D0_mat)[:, :norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
         #Eband0 = factor * (H[:norbsInCore] @ (D - D0_mat)[:norbsInCore]).diagonal(offset=0, dim1=-2, dim2=-1).sum()
         Eband0 = factor * (H[: norbsInCore] * D_shift[: norbsInCore]).sum()
         #Eband0 = factor *(H0 * D_shift).sum()
-        print(f'Eband0: {Eband0}')
+        #print(f'Eband0: {Eband0}')
 
         # Entropy contribution
         #eps = 1e-7
@@ -1582,10 +1648,10 @@ def get_energy_forces_modules(
                 verbose=False,
                 )
             )
-        print('ERep_CC: ',ERep_CC)
+        #print('ERep_CC: ',ERep_CC)
         halo_atoms = nats - numberOfCoreAtoms
         if halo_atoms != 0:
-            print('number of halo atoms: ', halo_atoms)
+            #print('number of halo atoms: ', halo_atoms)
             index = numberOfCoreAtoms + 1
             ERep_HH, _  = (
                 get_repulsion_energy(
@@ -1637,7 +1703,7 @@ def get_energy_forces_modules(
                 verbose=False,
                 )
             )
-        print(f'E_repulsion: {ERep}')
+        #print(f'E_repulsion: {ERep}')
         #print("E Rep full: ", ERep)
         #################################################################
 
@@ -1831,9 +1897,6 @@ def get_energy_forces_modules(
 
     else:
         error_at("get_energy_force_modules", "No specific engine type defined")
-    
-    print('LATTE energies', energyFlat_out[0])
-    print('LATTE forces', forces)
 
     return energyFlat_out[0], forces
 
@@ -1962,7 +2025,6 @@ def call_latte_modules(eng, Sy, verb=False, newsystem=True):
             xlo_ptr,
             xhi_ptr,
             ctypes.c_double(xy),
-            ctypes.c_double(xz),
             ctypes.c_double(yz),
             forces_ptr,
             ctypes.c_int(maxiter),

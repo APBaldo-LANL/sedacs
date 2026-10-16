@@ -2,8 +2,8 @@ TITLE     my_single_water.xyz
 REMARK    THIS IS A SIMULATION BOX
 CRYST1   31.230   31.230   31.230  90.00  90.00  90.00 P 1           1
 MODEL        1
-ATOM      1  O   HOH     1      15.427  15.434  15.615  1.00  0.00           O
-ATOM      2  H   HOH     0      15.009  16.295  15.615  1.00  0.00           H
+ATOM      1  H   HOH     0      15.009  16.295  15.615  1.00  0.00           H
+ATOM      2  O   HOH     1      15.427  15.434  15.615  1.00  0.00           O
 ATOM      3  H   HOH     0      16.408  15.115  15.615  1.00  0.00           H
 ATOM      4  OW  SOL     1       5.690  12.751  11.651  1.00  0.00           O
 ATOM      5  HW1 SOL     1       4.760  12.681  11.281  1.00  0.00           H
