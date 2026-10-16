@@ -1,0 +1,22 @@
+{
+"UNRESTRICTED": "False",
+"SHARED_MU": False,
+"BROKEN_SYM": False,
+    
+    
+    
+    "coul_method": "!PME",
+    "Coulomb_acc": 1e-6,
+    "cutoff": 20.0,
+    "PME_order": 4,
+
+    "SCF_MAX_ITER": 90,
+    "SCF_TOL": 1e-6,
+    "SCF_ALPHA": 0.1,
+ 
+    "KRYLOV_MAXRANK": 15,
+    "KRYLOV_TOL": 1e-6,
+    "KRYLOV_TOL_MD": 1e-7,
+    "KRYLOV_START": 3,
+#    "d3_params": {"s6": 1.0, "s8": 0.5883, "a1": 0.5719, "a2": 3.6107},
+}
